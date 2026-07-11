@@ -19,7 +19,7 @@ extern crate alloc;
 
 use alloc::vec::Vec;
 
-use crate::arithmetic_decoder::Context;
+use crate::arithmetic_decoder::ArithmeticDecoderContext;
 
 /// A reusable context for decoding JBIG2 images.
 #[derive(Default)]
@@ -31,7 +31,7 @@ pub struct DecoderContext {
 
 #[derive(Default)]
 pub(crate) struct ScratchBuffers {
-    pub(crate) contexts: Vec<Context>,
+    pub(crate) contexts: Vec<ArithmeticDecoderContext>,
 }
 
 /// A decoder for JBIG2 images.
@@ -66,6 +66,7 @@ mod lazy;
 mod page_info;
 mod reader;
 mod segment;
+mod simd;
 mod symbol_id_decoder;
 
 use error::bail;
@@ -157,6 +158,10 @@ impl<'a> Image<'a> {
         } else {
             page_info.height
         };
+
+        if page_info.width == 0 || height == 0 {
+            bail!(FormatError::EmptyPage);
+        }
 
         Ok(Self {
             segments,
@@ -679,7 +684,7 @@ fn init_page(
     // "Bit 2: Page default pixel value. This bit contains the initial value
     // for every pixel in the page, before any region segments are decoded
     // or drawn." (7.4.8.5)
-    bitmap.reinitialize(page_info.width, height, page_info.flags.default_pixel != 0);
+    bitmap.reinitialize(page_info.width, height, page_info.flags.default_pixel != 0)?;
 
     page.reset(page_info);
 
