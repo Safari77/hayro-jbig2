@@ -27,6 +27,8 @@ pub(crate) struct GrayScaleParams<'a> {
     /// `GSKIP` - A mask indicating which values should be skipped.
     /// None if `GSUSESKIP` = 0.
     pub(crate) skip_mask: Option<&'a [u32]>,
+    /// Whether strict mode is enabled.
+    pub(crate) strict: bool,
 }
 
 /// The gray-scale image decoding procedure (Annex C, C.5).
@@ -61,7 +63,7 @@ fn decode_mmr(data: &[u8], params: &GrayScaleParams<'_>) -> Result<Vec<u32>> {
     let mut offset = 0;
     decode_bitplanes(width, height, stride, bits_per_pixel, |_, bitplane| {
         // Table C.4: "GBW = GSW, GBH = GSH"
-        offset += decode_bitmap_mmr(bitplane, &data[offset..])?;
+        offset += decode_bitmap_mmr(bitplane, &data[offset..], params.strict)?;
 
         Ok(())
     })
@@ -175,6 +177,7 @@ fn decode_arithmetic(
 ///
 /// The closure `decode_next` is called for each bitplane, receiving the bitplane
 /// index (`GSBPP`-1 down to 0) and a zeroed bitmap to decode into.
+#[inline(never)]
 fn decode_bitplanes<F>(
     width: u32,
     height: u32,
