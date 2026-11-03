@@ -283,14 +283,19 @@ pub(crate) fn decode_bitmap_mmr(bitmap: &mut Bitmap, data: &[u8], strict: bool) 
     let height = bitmap.height;
     let mut decoder = BitmapDecoder { bitmap, y: 0 };
 
-    let mut settings = hayro_ccitt::DecodeSettings::new(width, height);
-    // "If the number of bytes contained in the encoded bitmap is known in
-    // advance, then it is permissible for the data stream not to contain
-    // an EOFB" (6.2.6). But it _can_ contain it, which is what this
-    // flag indicates.
-    settings.end_of_block = true;
-    settings.encoding = hayro_ccitt::EncodingMode::Group4;
-    settings.strict = strict;
+    let settings = hayro_ccitt::DecodeSettings {
+        columns: width,
+        rows: height,
+        // "If the number of bytes contained in the encoded bitmap is known in
+        // advance, then it is permissible for the data stream not to contain
+        // an EOFB" (6.2.6). But it _can_ contain it, which is what this
+        // flag indicates.
+        end_of_block: true,
+        end_of_line: false,
+        rows_are_byte_aligned: false,
+        encoding: hayro_ccitt::EncodingMode::Group4,
+        strict,
+    };
 
     // "An invocation of the generic region decoding procedure with MMR equal to
     // 1 shall consume an integral number of bytes, beginning and ending on a
@@ -476,22 +481,31 @@ macro_rules! decode_default_template_fast_loop {
                     0
                 };
 
-                // In an all-white or all-black area, all pixels of the byte have the
-                // same context, so they can be decoded at once.
+                // If the context and the pixels the rows above bring in next are all
+                // white (or all black), the context stays the same for all eight
+                // pixels as long as they decode to that same color. If that color is
+                // the context's MPS and the decoder can decode eight MPS without
+                // renormalizing, all eight pixels have that color.
                 let prev2_mask = ($params).prev2_next_mask * 0xff;
                 let prev1_mask = ($params).prev1_next_mask * 0xff;
                 let incoming_prev2 = val_prev2 & prev2_mask;
                 let incoming_prev1 = (val_prev1 >> ($params).prev1_shift) & prev1_mask;
-                let white = context == 0 && incoming_prev2 == 0 && incoming_prev1 == 0;
-                let black = context == ($params).full_context
+                let uniform_color = if context == 0 && incoming_prev2 == 0 && incoming_prev1 == 0 {
+                    Some(0)
+                } else if context == ($params).full_context
                     && incoming_prev2 == prev2_mask
-                    && incoming_prev1 == prev1_mask;
+                    && incoming_prev1 == prev1_mask
+                {
+                    Some(1)
+                } else {
+                    None
+                };
 
-                if white || black {
+                if let Some(color) = uniform_color {
                     let state = $contexts[context as usize];
 
-                    if state.mps() == black as u32 && $decoder.skip_mps(state, BYTE_BITS) {
-                        $bitmap.set_row_byte(y, byte_idx, if black { 0xff } else { 0 });
+                    if state.mps() == color && $decoder.decode_mps_run(state, BYTE_BITS) {
+                        $bitmap.set_row_byte(y, byte_idx, if color == 1 { 0xff } else { 0 });
                         continue;
                     }
                 }
